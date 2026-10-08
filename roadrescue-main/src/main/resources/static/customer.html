@@ -685,7 +685,7 @@ tbody tr:last-child td { border-bottom: none; }
                 </div>
             </div>
             
-            <button class="btn-sub" onclick="submitReq()">Submit Request</button>
+            <button class="btn-sub" onclick="submitReq(this)">Submit Request</button>
         </div>
     </div>
 
@@ -814,7 +814,7 @@ tbody tr:last-child td { border-bottom: none; }
                 <label style="color:var(--text-muted)">Comments</label>
                 <textarea class="review-comment" id="reviewComment" placeholder="Tell us about your experience..."></textarea>
             </div>
-            <button class="btn-submit-review" onclick="submitReview()">Submit Review</button>
+            <button class="btn-submit-review" onclick="submitReview(this)">Submit Review</button>
         </div>
     </div>
 </div>
@@ -849,6 +849,8 @@ tbody tr:last-child td { border-bottom: none; }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const API = "";
+let requestSubmitting = false;
+let reviewSubmitting = false;
 const uname = localStorage.getItem("username");
 const sUser = uname; // alias used in tracking links
 const role = localStorage.getItem("role");
@@ -977,7 +979,8 @@ function fmtPhone(inp) {
 function handleIssue(v) { document.getElementById("othersField").style.display = v === "Others" ? "block" : "none"; }
 
 // ---- Submit ----
-function submitReq() {
+async function submitReq(button) {
+  if (requestSubmitting) return;
   const veh = document.getElementById("vehicle").value.trim();
   const isel = document.getElementById("issueSel").value;
   const otxt = document.getElementById("othersText").value.trim();
@@ -990,18 +993,26 @@ function submitReq() {
   if (!selLat || !selLng) { alert("Please select your location first."); return; }
   const body = { customerName: uname, vehicleNumber: veh, issue, phone: ph, latitude: selLat, longitude: selLng };
   if (vehicleImgBase64) body.vehicleImage = vehicleImgBase64;
-  
-  fetch(API + "/api/requests", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-  })
-  .then(r => r.json())
-  .then(() => {
+
+  requestSubmitting = true;
+  button.disabled = true;
+  try {
+    const response = await fetch(API + "/api/requests", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error("Failed to submit. Please try again.");
+    await response.json();
     document.getElementById("vehicle").value = "";
+    document.getElementById("vehicle").classList.remove("valid", "invalid");
+    document.getElementById("vErr").style.display = "none";
     document.getElementById("issueSel").value = "";
     document.getElementById("othersText").value = "";
     document.getElementById("othersField").style.display = "none";
     document.getElementById("phone").value = "";
+    document.getElementById("phone").classList.remove("valid", "invalid");
+    document.getElementById("pErr").style.display = "none";
     document.getElementById("locDisplay").innerText = "";
+    document.getElementById("locDisplay").style.color = "";
     document.getElementById('locBtn').classList.remove('selected');
     document.getElementById('locBtnIcon').innerText = '📍';
     document.getElementById('locBtnText').innerText = 'Select Location';
@@ -1009,8 +1020,12 @@ function submitReq() {
     removeImg();
     document.getElementById("subOv").classList.add("show");
     fetchReqs();
-  })
-  .catch(() => alert("Failed to submit. Please try again."));
+  } catch (e) {
+    alert(e.message || "Failed to submit. Please try again.");
+  } finally {
+    requestSubmitting = false;
+    button.disabled = false;
+  }
 }
 
 // ---- Fetch requests ----
@@ -1116,16 +1131,31 @@ function setStars(n) {
   document.getElementById("starLabel").innerText = starLabels[n];
 }
 
-function submitReview() {
+async function submitReview(button) {
+  if (reviewSubmitting || !reviewRequestId) return;
   if (!selectedStars) { alert("Please select a star rating."); return; }
   const comment = document.getElementById("reviewComment").value.trim();
-  fetch(API + "/api/requests/" + reviewRequestId + "/review", {
-    method: "PATCH", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reviewRating: selectedStars, reviewComment: comment })
-  })
-  .then(res => { if (!res.ok) throw new Error(); return res.json(); })
-  .then(() => { closeReview(); fetchReqs(); })
-  .catch(() => alert("Failed to submit review."));
+  reviewSubmitting = true;
+  button.disabled = true;
+  try {
+    const response = await fetch(API + "/api/requests/" + reviewRequestId + "/review", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewRating: selectedStars, reviewComment: comment })
+    });
+    if (!response.ok) throw new Error();
+    await response.json();
+    document.getElementById("reviewComment").value = "";
+    selectedStars = 0;
+    document.getElementById("starLabel").innerText = "";
+    document.querySelectorAll(".star").forEach(s => s.classList.remove("on"));
+    closeReview();
+    fetchReqs();
+  } catch (e) {
+    alert("Failed to submit review.");
+  } finally {
+    reviewSubmitting = false;
+    button.disabled = false;
+  }
 }
 
 function viewReview(rating, comment) {

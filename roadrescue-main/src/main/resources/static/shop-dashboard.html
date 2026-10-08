@@ -489,7 +489,7 @@
                 <button type="button" class="btn-add-branch" onclick="addBranch()">+ Add Branch</button>
             </div>
             
-            <button class="btn-save-profile" onclick="saveProfile()">Save Changes</button>
+            <button class="btn-save-profile" onclick="saveProfile(this)">Save Changes</button>
         </div>
     </div>
 </div>
@@ -544,7 +544,7 @@
 
             <div class="popup-actions">
                 <button class="btn-cancel" onclick="closePopup()">Cancel</button>
-                <button class="btn-confirm" onclick="confirmAccept()">Confirm & Accept</button>
+                <button class="btn-confirm" onclick="confirmAccept(this)">Confirm & Accept</button>
             </div>
         </div>
     </div>
@@ -586,6 +586,8 @@ const role = localStorage.getItem("role");
 if (!sUser || role !== "SHOP_OWNER") { alert("Access denied!"); window.location.href = "index.html"; }
 
 let currentRequestId = null;
+let acceptanceSubmitting = false;
+let profileSubmitting = false;
 // mechanic map removed - live tracking used instead
 let allRequests = [];
 const starLabels = ["", "Poor", "Fair", "Good", "Very Good", "Excellent"];
@@ -701,24 +703,34 @@ function closePopup() {
     currentRequestId = null;
 }
 
-function confirmAccept() {
+async function confirmAccept(button) {
+    if (acceptanceSubmitting) return;
     const name = document.getElementById("mName").value.trim();
     const phone = document.getElementById("mPhone").value.trim();
     const eta = document.getElementById("mETA").value.trim();
     if (!name || !phone || !eta) { alert("Please fill in all mechanic details!"); return; }
     
-    fetch(API + `/api/requests/${currentRequestId}/accept`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            shopUsername: sUser,
-            mechanicName: name, mechanicPhone: phone, estimatedArrival: eta, 
-            mechanicLatitude: mechanicLat ? String(mechanicLat) : "", 
-            mechanicLongitude: mechanicLng ? String(mechanicLng) : "" 
-        })
-    })
-    .then(res => { if (!res.ok) throw new Error(); return res.json(); })
-    .then(() => {
+    acceptanceSubmitting = true;
+    button.disabled = true;
+    try {
+        const response = await fetch(API + `/api/requests/${currentRequestId}/accept`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                shopUsername: sUser,
+                mechanicName: name, mechanicPhone: phone, estimatedArrival: eta,
+                mechanicLatitude: mechanicLat ? String(mechanicLat) : "",
+                mechanicLongitude: mechanicLng ? String(mechanicLng) : ""
+            })
+        });
+        if (!response.ok) throw new Error();
+        await response.json();
+        document.getElementById("mName").value = "";
+        document.getElementById("mPhone").value = "";
+        document.getElementById("mETA").value = "";
+        document.getElementById("mLocDisplay").innerText = "No location selected.";
+        mechanicLat = null;
+        mechanicLng = null;
         const acceptedRequestId = currentRequestId; // capture BEFORE closePopup() nullifies it
         closePopup();
         fetchShopRequests();
@@ -733,8 +745,12 @@ function confirmAccept() {
         document.getElementById('smsShareBtn').href = 'sms:+' + indiaPhone + '?body=' + encodeURIComponent('RoadRescue mechanic tracker link: ' + trackLink);
         document.getElementById('copyConfirm').style.display = 'none';
         document.getElementById('shareOverlay').classList.add('show');
-    })
-    .catch(() => alert("Failed to accept request."));
+    } catch (e) {
+        alert("Failed to accept request.");
+    } finally {
+        acceptanceSubmitting = false;
+        button.disabled = false;
+    }
 }
 
 function copyShareLink() {
@@ -842,7 +858,8 @@ function saveBranchStates() {
     });
 }
 
-function saveProfile() {
+async function saveProfile(button) {
+    if (profileSubmitting) return;
     const ownerName = document.getElementById("ownerName").value.trim();
     const phone = document.getElementById("phone").value.trim();
     const email = document.getElementById("email").value.trim();
@@ -852,16 +869,27 @@ function saveProfile() {
     saveBranchStates();
     const cleanBranches = branchesArr.filter(b => b.name.trim() !== "");
 
-    fetch(API + "/api/shop/profile/" + sUser, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            ownerName, phone, email, openingTime, closingTime,
-            branchesJson: JSON.stringify(cleanBranches)
-        })
-    })
-    .then(r => { if(r.ok) { alert("Profile saved!"); fetchProfile(); } else throw new Error(); })
-    .catch(() => alert("Failed to save profile."));
+    profileSubmitting = true;
+    button.disabled = true;
+    try {
+        const response = await fetch(API + "/api/shop/profile/" + sUser, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                ownerName, phone, email, openingTime, closingTime,
+                branchesJson: JSON.stringify(cleanBranches)
+            })
+        });
+        if (!response.ok) throw new Error();
+        await response.json();
+        alert("Profile saved!");
+        fetchProfile();
+    } catch (e) {
+        alert("Failed to save profile.");
+    } finally {
+        profileSubmitting = false;
+        button.disabled = false;
+    }
 }
 
 // ---- My Reports Logic ----

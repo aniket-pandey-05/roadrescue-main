@@ -460,7 +460,7 @@
                         <input type="password" id="lPass" class="input-field" placeholder="Enter your password">
                     </div>
 
-                    <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+                    <button class="btn btn-primary" onclick="doLogin(this)">Sign In</button>
                     <div class="msg" id="lMsg"></div>
 
                     <div class="divider">New to RoadRescue?</div>
@@ -494,7 +494,7 @@
                         </div>
                     </div>
 
-                    <button class="btn btn-primary" onclick="doRegister()">Create Account</button>
+                    <button class="btn btn-primary" onclick="doRegister(this)">Create Account</button>
                     <button class="btn btn-secondary" onclick="show('vLogin')">Back to Sign In</button>
                     <div class="msg" id="rMsg"></div>
                 </div>
@@ -515,7 +515,7 @@
                         <input type="password" id="slPass" class="input-field" placeholder="Enter your password">
                     </div>
 
-                    <button class="btn btn-primary" onclick="doShopLogin()">Sign In as Shop</button>
+                    <button class="btn btn-primary" onclick="doShopLogin(this)">Sign In as Shop</button>
                     <div class="msg" id="slMsg"></div>
 
                     <div class="divider">Partner with us</div>
@@ -582,7 +582,7 @@
                         <div id="branchList"></div>
                     </div>
 
-                    <button class="btn btn-primary" onclick="doShopRegister()">Submit Application</button>
+                    <button class="btn btn-primary" onclick="doShopRegister(this)">Submit Application</button>
                     <button class="btn btn-secondary" onclick="show('vShopLogin')">Back to Shop Login</button>
                     <div class="msg" id="srMsg"></div>
                 </div>
@@ -603,7 +603,7 @@
                         <input type="password" id="aPass" class="input-field" placeholder="Enter admin password">
                     </div>
 
-                    <button class="btn btn-primary" onclick="doAdminLogin()">Secure Login</button>
+                    <button class="btn btn-primary" onclick="doAdminLogin(this)">Secure Login</button>
                     <button class="btn btn-secondary" onclick="show('vLogin'); document.getElementById('mainTabs').style.display='flex'; switchMainTab('customer');">Back to Customer Site</button>
                     <div class="msg" id="aMsg"></div>
                 </div>
@@ -640,6 +640,19 @@
 
 <script>
 const API = "";
+const pendingSubmissions = new Set();
+
+function beginSubmission(key, button) {
+    if (pendingSubmissions.has(key)) return false;
+    pendingSubmissions.add(key);
+    if (button) button.disabled = true;
+    return true;
+}
+
+function endSubmission(key, button) {
+    pendingSubmissions.delete(key);
+    if (button) button.disabled = false;
+}
 
 function show(id) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -689,43 +702,57 @@ function validatePwd(p) {
 }
 
 // --- Customer Logic ---
-function doLogin() {
+async function doLogin(button) {
     const u = document.getElementById('lUser').value.trim();
     const p = document.getElementById('lPass').value.trim();
     if(!u || !p) { setMsg('lMsg', 'Please enter username and password.', 'err'); return; }
-    
-    fetch(API + '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({username: u, password: p})
-    })
-    .then(r => { if(r.ok) return r.json(); throw new Error('Invalid username or password.'); })
-    .then(user => {
+    if (!beginSubmission('customer-login', button)) return;
+    try {
+        const response = await fetch(API + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({username: u, password: p})
+        });
+        if (!response.ok) throw new Error('Invalid username or password.');
+        const user = await response.json();
         if(user.role === 'ADMIN') { setMsg('lMsg', 'Please use Admin Access to sign in.', 'err'); return; }
+        document.getElementById('lUser').value = '';
+        document.getElementById('lPass').value = '';
         localStorage.setItem('username', user.username);
         localStorage.setItem('role', user.role);
         window.location.href = 'customer.html';
-    }).catch(e => setMsg('lMsg', e.message, 'err'));
+    } catch (e) {
+        setMsg('lMsg', e.message, 'err');
+    } finally {
+        endSubmission('customer-login', button);
+    }
 }
 
-function doRegister() {
+async function doRegister(button) {
     const u = document.getElementById('rUser').value.trim();
     const p = document.getElementById('rPass').value.trim();
     if(!u || !p) { setMsg('rMsg', 'Please fill all fields.', 'err'); return; }
     
     const err = validatePwd(p);
     if(err) { setMsg('rMsg', err, 'err'); return; }
-    
-    fetch(API + '/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({username: u, password: p})
-    })
-    .then(r => r.text())
-    .then(msg => {
-        if(msg.toLowerCase().includes('exist')) { setMsg('rMsg', msg, 'err'); return; }
+    if (!beginSubmission('customer-register', button)) return;
+    try {
+        const response = await fetch(API + '/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({username: u, password: p})
+        });
+        const msg = await response.text();
+        if (!response.ok) throw new Error(msg || 'Registration failed. Try again.');
+        document.getElementById('rUser').value = '';
+        document.getElementById('rPass').value = '';
+        document.getElementById('pwdCrit').classList.remove('show');
         document.getElementById('successOv').classList.add('show');
-    }).catch(() => setMsg('rMsg', 'Registration failed. Try again.', 'err'));
+    } catch (e) {
+        setMsg('rMsg', e.message || 'Registration failed. Try again.', 'err');
+    } finally {
+        endSubmission('customer-register', button);
+    }
 }
 
 function closeSuccess() {
@@ -737,23 +764,30 @@ function closeSuccess() {
 }
 
 // --- Admin Logic ---
-function doAdminLogin() {
+async function doAdminLogin(button) {
     const u = document.getElementById('aUser').value.trim();
     const p = document.getElementById('aPass').value.trim();
     if(!u || !p) { setMsg('aMsg', 'Please enter credentials.', 'err'); return; }
-    
-    fetch(API + '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({username: u, password: p})
-    })
-    .then(r => { if(r.ok) return r.json(); throw new Error('Invalid admin credentials.'); })
-    .then(user => {
+    if (!beginSubmission('admin-login', button)) return;
+    try {
+        const response = await fetch(API + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({username: u, password: p})
+        });
+        if (!response.ok) throw new Error('Invalid admin credentials.');
+        const user = await response.json();
         if(user.role !== 'ADMIN') { setMsg('aMsg', 'Access denied. Not an admin.', 'err'); return; }
+        document.getElementById('aUser').value = '';
+        document.getElementById('aPass').value = '';
         localStorage.setItem('username', user.username);
         localStorage.setItem('role', user.role);
         window.location.href = 'admin.html';
-    }).catch(e => setMsg('aMsg', e.message, 'err'));
+    } catch (e) {
+        setMsg('aMsg', e.message, 'err');
+    } finally {
+        endSubmission('admin-login', button);
+    }
 }
 
 // --- Shop Logic ---
@@ -783,26 +817,33 @@ function removeBranch(idx) {
     if (el) el.remove();
 }
 
-function doShopLogin() {
+async function doShopLogin(button) {
     const u = document.getElementById('slUser').value.trim();
     const p = document.getElementById('slPass').value.trim();
     if (!u || !p) { setMsg('slMsg', 'Please enter username and password.', 'err'); return; }
-    
-    fetch(API + '/api/shop/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password: p })
-    })
-    .then(r => { if (r.ok) return r.json(); throw new Error('Invalid credentials.'); })
-    .then(shop => {
+    if (!beginSubmission('shop-login', button)) return;
+    try {
+        const response = await fetch(API + '/api/shop/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p })
+        });
+        if (!response.ok) throw new Error('Invalid credentials.');
+        const shop = await response.json();
+        document.getElementById('slUser').value = '';
+        document.getElementById('slPass').value = '';
         localStorage.setItem('shopUsername', shop.username);
         localStorage.setItem('shopName', shop.shopName);
         localStorage.setItem('role', 'SHOP_OWNER');
         window.location.href = 'shop-dashboard.html';
-    }).catch(e => setMsg('slMsg', e.message, 'err'));
+    } catch (e) {
+        setMsg('slMsg', e.message, 'err');
+    } finally {
+        endSubmission('shop-login', button);
+    }
 }
 
-function doShopRegister() {
+async function doShopRegister(button) {
     const shopName = document.getElementById('srShopName').value.trim();
     const ownerName = document.getElementById('srOwnerName').value.trim();
     const phone = document.getElementById('srPhone').value.trim();
@@ -833,21 +874,33 @@ function doShopRegister() {
         setMsg('srMsg', 'At least one branch location with Latitude and Longitude is required.', 'err'); return;
     }
 
+    if (!beginSubmission('shop-register', button)) return;
     const payload = { shopName, ownerName, phone, email, openingTime, closingTime, username, password, branchesJson: JSON.stringify(branches) };
-
-    fetch(API + '/api/shop/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.text())
-    .then(msg => {
-        if (msg.toLowerCase().includes('exist') || msg.toLowerCase().includes('required')) {
-            setMsg('srMsg', msg, 'err'); return;
-        }
+    try {
+        const response = await fetch(API + '/api/shop/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const msg = await response.text();
+        if (!response.ok) throw new Error(msg || 'Registration failed. Try again.');
+        document.getElementById('srShopName').value = '';
+        document.getElementById('srOwnerName').value = '';
+        document.getElementById('srPhone').value = '';
+        document.getElementById('srEmail').value = '';
+        document.getElementById('srOpen').value = '';
+        document.getElementById('srClose').value = '';
+        document.getElementById('srUser').value = '';
+        document.getElementById('srPass').value = '';
+        document.getElementById('srPwdCrit').classList.remove('show');
+        document.getElementById('branchList').innerHTML = '';
         setMsg('srMsg', 'Shop registered! Redirecting...', 'ok');
         setTimeout(() => show('vShopLogin'), 1500);
-    }).catch(() => setMsg('srMsg', 'Registration failed. Try again.', 'err'));
+    } catch (e) {
+        setMsg('srMsg', e.message || 'Registration failed. Try again.', 'err');
+    } finally {
+        endSubmission('shop-register', button);
+    }
 }
 
 // ── Online / Offline UI toggle ──────────────────────────
